@@ -33,7 +33,7 @@ const modelCards = [
     label: 'OPENAI',
     mark: 'O',
     title: 'GPT and Codex in one lane',
-    chips: ['GPT frontier', 'mini tiers', 'Codex ready'],
+    chips: ['Llama live', 'mini tiers', 'Codex ready'],
     text: 'Keep OpenAI-compatible chat completions, token-aware usage, and reasoning model access behind one Kiwi endpoint.',
   },
   {
@@ -66,7 +66,7 @@ const docExamples = [
     note: 'Messages route compatible',
     code: [
       'export ANTHROPIC_API_KEY=Kiwi_••••',
-      'export ANTHROPIC_BASE_URL=https://api.kiwillm.dev/v1',
+      'export ANTHROPIC_BASE_URL=https://api.kiwillm.in/v1',
       'claude "review this pull request"',
     ],
   },
@@ -77,9 +77,9 @@ const docExamples = [
       'from openai import OpenAI',
       'client = OpenAI(',
       '  api_key="Kiwi_••••",',
-      '  base_url="https://api.kiwillm.dev/v1"',
+      '  base_url="https://api.kiwillm.in/v1"',
       ')',
-      'client.chat.completions.create(model="gpt-frontier")',
+      'client.chat.completions.create(model="llama-3.2-1b")',
     ],
   },
   {
@@ -87,9 +87,9 @@ const docExamples = [
     note: 'Use as a custom provider',
     code: [
       'Provider:  OpenAI Compatible',
-      'Base URL:  https://api.kiwillm.dev/v1',
+      'Base URL:  https://api.kiwillm.in/v1',
       'API Key:   Kiwi_••••',
-      'Model:     claude-sonnet or any route',
+      'Model:     llama-3.2-1b or any live model',
     ],
   },
   {
@@ -97,7 +97,7 @@ const docExamples = [
     note: 'Chat completions endpoint',
     code: [
       'export OPENAI_API_KEY=Kiwi_••••',
-      'export OPENAI_BASE_URL=https://api.kiwillm.dev/v1',
+      'export OPENAI_BASE_URL=https://api.kiwillm.in/v1',
       'codex "scaffold a fastapi service"',
     ],
   },
@@ -185,23 +185,23 @@ const docsCodeBlocks = [
   {
     section: 'Quick test',
     title: 'OPENAI-STYLE REQUEST',
-    code: `curl https://api.kiwillm.dev/v1/chat/completions \\
+    code: `curl https://api.kiwillm.in/v1/chat/completions \\
   -H "Authorization: Bearer YOUR_KIWI_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "gpt-frontier",
+    "model": "llama-3.2-1b",
     "messages": [{"role":"user","content":"hello"}]
   }'`,
   },
   {
     section: 'Quick test',
     title: 'ANTHROPIC-STYLE REQUEST',
-    code: `curl https://api.kiwillm.dev/v1/messages \\
+    code: `curl https://api.kiwillm.in/v1/messages \\
   -H "x-api-key: YOUR_KIWI_KEY" \\
   -H "anthropic-version: 2023-06-01" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "claude-sonnet-route",
+    "model": "claude-sonnet P1",
     "max_tokens": 256,
     "messages": [{"role":"user","content":"hello"}]
   }'`,
@@ -209,16 +209,16 @@ const docsCodeBlocks = [
   {
     section: 'Quick test',
     title: 'LIST MODELS',
-    code: 'curl https://api.kiwillm.dev/v1/models -H "Authorization: Bearer YOUR_KIWI_KEY"',
+    code: 'curl https://api.kiwillm.in/v1/models -H "Authorization: Bearer YOUR_KIWI_KEY"',
   },
   {
     section: 'Images',
     title: 'CURL',
-    code: `curl https://api.kiwillm.dev/v1/images/generations \\
+    code: `curl https://api.kiwillm.in/v1/images/generations \\
   -H "Authorization: Bearer YOUR_KIWI_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "image-frontier",
+    "model": "flux",
     "prompt": "a luminous kiwi dashboard floating in deep space",
     "n": 1,
     "size": "1024x1024"
@@ -231,11 +231,11 @@ const docsCodeBlocks = [
 
 const client = new OpenAI({
   apiKey: "YOUR_KIWI_KEY",
-  baseURL: "https://api.kiwillm.dev/v1",
+  baseURL: "https://api.kiwillm.in/v1",
 });
 
 const image = await client.images.generate({
-  model: "image-frontier",
+  model: "flux",
   prompt: "a luminous kiwi dashboard floating in deep space",
   n: 1,
   size: "1024x1024",
@@ -246,11 +246,11 @@ console.log(image.data?.[0]?.url);`,
   {
     section: 'Video',
     title: 'CURL',
-    code: `curl https://api.kiwillm.dev/v1/video/generations \\
+    code: `curl https://api.kiwillm.in/v1/video/generations \\
   -H "Authorization: Bearer YOUR_KIWI_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "video-frontier",
+    "model": "sora",
     "prompt": "a slow dolly shot through a neon server room",
     "n": 1
   }'`,
@@ -258,14 +258,14 @@ console.log(image.data?.[0]?.url);`,
   {
     section: 'Video',
     title: 'JAVASCRIPT FETCH',
-    code: `const res = await fetch("https://api.kiwillm.dev/v1/video/generations", {
+    code: `const res = await fetch("https://api.kiwillm.in/v1/video/generations", {
   method: "POST",
   headers: {
     "Authorization": "Bearer YOUR_KIWI_KEY",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
-    model: "video-frontier",
+    model: "sora",
     prompt: "a slow dolly shot through a neon server room",
     n: 1,
   }),
@@ -277,18 +277,18 @@ console.log(video.data?.[0]?.url ?? video);`,
   {
     section: 'Claude',
     title: 'MACOS / LINUX',
-    code: `export ANTHROPIC_BASE_URL="https://api.kiwillm.dev/v1"
+    code: `export ANTHROPIC_BASE_URL="https://api.kiwillm.in/v1"
 export ANTHROPIC_API_KEY="YOUR_KIWI_KEY"
-export ANTHROPIC_MODEL="claude-sonnet-route"
+export ANTHROPIC_MODEL="claude-sonnet P1"
 
 claude "explain this repository"`,
   },
   {
     section: 'Claude',
     title: 'WINDOWS POWERSHELL',
-    code: `$env:ANTHROPIC_BASE_URL = "https://api.kiwillm.dev/v1"
+    code: `$env:ANTHROPIC_BASE_URL = "https://api.kiwillm.in/v1"
 $env:ANTHROPIC_API_KEY = "YOUR_KIWI_KEY"
-$env:ANTHROPIC_MODEL = "claude-sonnet-route"
+$env:ANTHROPIC_MODEL = "claude-sonnet P1"
 
 claude "hello"`,
   },
@@ -296,15 +296,15 @@ claude "hello"`,
     section: 'Aider',
     title: 'ANTHROPIC MODE',
     code: `export ANTHROPIC_API_KEY="YOUR_KIWI_KEY"
-export ANTHROPIC_API_BASE="https://api.kiwillm.dev/v1"
-aider --model anthropic/claude-sonnet-route`,
+export ANTHROPIC_API_BASE="https://api.kiwillm.in/v1"
+aider --model anthropic/claude-sonnet P1`,
   },
   {
     section: 'Aider',
     title: 'OPENAI MODE',
     code: `export OPENAI_API_KEY="YOUR_KIWI_KEY"
-export OPENAI_API_BASE="https://api.kiwillm.dev/v1"
-aider --model openai/gpt-frontier`,
+export OPENAI_API_BASE="https://api.kiwillm.in/v1"
+aider --model openai/llama-3.2-1b`,
   },
   {
     section: 'Continue',
@@ -314,8 +314,8 @@ aider --model openai/gpt-frontier`,
     {
       "title": "Kiwi - Coding Agent",
       "provider": "openai",
-      "model": "gpt-frontier",
-      "apiBase": "https://api.kiwillm.dev/v1",
+      "model": "llama-3.2-1b",
+      "apiBase": "https://api.kiwillm.in/v1",
       "apiKey": "YOUR_KIWI_KEY"
     }
   ]
@@ -328,11 +328,11 @@ aider --model openai/gpt-frontier`,
 
 client = OpenAI(
     api_key="YOUR_KIWI_KEY",
-    base_url="https://api.kiwillm.dev/v1",
+    base_url="https://api.kiwillm.in/v1",
 )
 
 resp = client.chat.completions.create(
-    model="gpt-frontier",
+    model="llama-3.2-1b",
     messages=[{"role": "user", "content": "hi"}],
 )
 print(resp.choices[0].message.content)`,
@@ -344,11 +344,11 @@ print(resp.choices[0].message.content)`,
 
 const client = new OpenAI({
   apiKey: "YOUR_KIWI_KEY",
-  baseURL: "https://api.kiwillm.dev/v1",
+  baseURL: "https://api.kiwillm.in/v1",
 });
 
 const r = await client.chat.completions.create({
-  model: "gpt-frontier",
+  model: "llama-3.2-1b",
   messages: [{ role: "user", content: "hi" }],
 });
 console.log(r.choices[0].message.content);`,
@@ -438,7 +438,7 @@ const renderHome = () => `
           <span></span><span></span><span></span>
         </div>
         <pre><code><span>$</span> export KIWI_KEY=Kiwi_live_••••••••
-<span>$</span> export KIWI_URL=https://api.kiwillm.dev/v1
+<span>$</span> export KIWI_URL=https://api.kiwillm.in/v1
 <b>$ kiwi ask</b> "map this repo and plan the change"</code></pre>
         <div class="terminal-status">
           <small>Latency</small>
@@ -576,8 +576,8 @@ const renderHome = () => `
       <div class="endpoint-strip reveal-item">
         <div>
           <p>ENDPOINTS</p>
-          <code>POST https://api.kiwillm.dev/v1/chat/completions</code>
-          <code>POST https://api.kiwillm.dev/v1/messages</code>
+          <code>POST https://api.kiwillm.in/v1/chat/completions</code>
+          <code>POST https://api.kiwillm.in/v1/messages</code>
           <small>Auth header: Authorization: Bearer Kiwi_••••</small>
         </div>
         <a class="button button-light" href="/dashboard">Get a key <span aria-hidden="true">↗</span></a>
@@ -687,9 +687,9 @@ const renderDocs = () => `
       <section class="docs-block">
         <h2>Three things you need</h2>
         <div class="need-grid">
-          <article><span>Base URL</span><code>https://api.kiwillm.dev/v1</code></article>
+          <article><span>Base URL</span><code>https://api.kiwillm.in/v1</code></article>
           <article><span>API key</span><code>Kiwi_xxxxxxxxxxxx</code><p>Create one from your dashboard.</p></article>
-          <article><span>Model id</span><code>gpt-frontier</code><p>Use text models for chat, image models for images, and video models for video runs.</p></article>
+          <article><span>Model id</span><code>llama-3.2-1b</code><p>Use text models for chat, image models for images, and video models for video runs.</p></article>
         </div>
       </section>
 
@@ -726,8 +726,8 @@ const renderDocs = () => `
         <h2>Roo Code and Cline</h2>
         <p>Use Kiwi as either an Anthropic-compatible or OpenAI-compatible provider.</p>
         <div class="docs-two-col">
-          <article><h3>Anthropic provider</h3><p>Provider: Anthropic<br>API key: YOUR_KIWI_KEY<br>Custom base URL: https://api.kiwillm.dev/v1<br>Model: claude-sonnet-route</p></article>
-          <article><h3>OpenAI-compatible provider</h3><p>Provider: OpenAI Compatible<br>Base URL: https://api.kiwillm.dev/v1<br>API key: YOUR_KIWI_KEY<br>Model: gpt-frontier</p></article>
+          <article><h3>Anthropic provider</h3><p>Provider: Anthropic<br>API key: YOUR_KIWI_KEY<br>Custom base URL: https://api.kiwillm.in/v1<br>Model: claude-sonnet P1</p></article>
+          <article><h3>OpenAI-compatible provider</h3><p>Provider: OpenAI Compatible<br>Base URL: https://api.kiwillm.in/v1<br>API key: YOUR_KIWI_KEY<br>Model: llama-3.2-1b</p></article>
         </div>
       </section>
 
@@ -877,9 +877,9 @@ const renderDashboard = () => `
         <article>
           <span>QUICK START</span>
           <h2>Send a test request</h2>
-          <pre><code>curl https://api.kiwillm.dev/v1/chat/completions \\
+          <pre><code>curl https://api.kiwillm.in/v1/chat/completions \\
   -H "Authorization: Bearer YOUR_KIWI_KEY" \\
-  -d '{"model":"gpt-frontier","messages":[{"role":"user","content":"hi"}]}'</code></pre>
+  -d '{"model":"llama-3.2-1b","messages":[{"role":"user","content":"hi"}]}'</code></pre>
         </article>
         <article>
           <span>NEXT STEP</span>

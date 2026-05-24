@@ -11,6 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
 const port = process.env.PORT || 3000
 const databaseUrl = process.env.DATABASE_URL || ''
+const isSupabasePostgres = databaseUrl.includes('supabase.co') || databaseUrl.includes('pooler.supabase.com')
 const dbPath = process.env.DB_PATH || join(__dirname, 'data', 'db.json')
 const workerBaseUrl = (process.env.UNIFIED_AI_WORKER_URL || 'https://unified-ai-worker.rutv.workers.dev').replace(/\/$/, '')
 const workerApiKey = process.env.UNIFIED_AI_WORKER_API_KEY || ''
@@ -25,20 +26,19 @@ app.use(express.json({ limit: '1mb' }))
 const pgPool = databaseUrl
   ? new pg.Pool({
       connectionString: databaseUrl,
-      ssl: databaseUrl.includes('supabase.co') ? { rejectUnauthorized: false } : undefined,
+      ssl: isSupabasePostgres ? { rejectUnauthorized: false } : undefined,
     })
   : null
 
 const fallbackModels = [
-  { id: 'gpt-frontier', provider: 'OpenAI', type: 'Text', context: '1M', input: 3, output: 12, status: 'Live' },
-  { id: 'claude-sonnet-route', provider: 'Anthropic', type: 'Text', context: '200K', input: 3, output: 15, status: 'Live' },
-  { id: 'claude-opus-route', provider: 'Anthropic', type: 'Text', context: '200K', input: 15, output: 75, status: 'Paid' },
-  { id: 'qwen-coder-fast', provider: 'Qwen', type: 'Code', context: '128K', input: 0.7, output: 2.8, status: 'Live' },
-  { id: 'kimi-reasoner', provider: 'Moonshot', type: 'Reasoning', context: '256K', input: 1.2, output: 5, status: 'Live' },
-  { id: 'glm-agentic', provider: 'Zhipu', type: 'Agent', context: '128K', input: 0.9, output: 3.6, status: 'Live' },
-  { id: 'deepseek-v4-pro', provider: 'DeepSeek', type: 'Reasoning', context: '128K', input: 0.8, output: 3.2, status: 'Live' },
-  { id: 'image-frontier', provider: 'Kiwi Media', type: 'Image', context: 'Prompt', input: 0.04, output: 0.08, status: 'Paid' },
-  { id: 'video-frontier', provider: 'Kiwi Media', type: 'Video', context: 'Prompt', input: 0.2, output: 1.6, status: 'Paid' },
+  { id: 'llama-3.2-1b', provider: 'Cloudflare', type: 'Text', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'llama-3.2-3b', provider: 'Cloudflare', type: 'Text', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'qwen-2.5-coder', provider: 'Cloudflare', type: 'Code', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'qwq-32b', provider: 'Cloudflare', type: 'Reasoning', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'gemini-2.5-flash-lite', provider: 'Gemini', type: 'Text', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'deepseek-chat', provider: 'DeepSeek', type: 'Text', context: 'Provider default', input: null, output: null, status: 'Live' },
+  { id: 'flux', provider: 'Pollinations', type: 'Image', context: 'Prompt', input: null, output: null, status: 'Live' },
+  { id: 'sora', provider: 'Sora', type: 'Video', context: 'Prompt', input: null, output: null, status: 'Live' },
 ]
 let modelCache = { expiresAt: 0, models: fallbackModels }
 
@@ -419,7 +419,7 @@ function normalizeDb(db) {
     db.workspace?.usedUsd30d >= 17.2 &&
     db.workspace?.tokens30d >= 4800000 &&
     Array.isArray(db.usage?.spendByModel) &&
-    db.usage.spendByModel.some((item) => item?.model === 'claude-sonnet-route' && item?.requests === 482)
+    db.usage.spendByModel.some((item) => item?.model === 'claude-sonnet P1' && item?.requests === 482)
 
   return {
     workspace: {
@@ -1019,7 +1019,7 @@ app.post('/api/keys', async (req, res) => {
 })
 
 app.post('/api/playground/run', async (req, res) => {
-  const model = String(req.body.model || 'gpt-frontier')
+  const model = String(req.body.model || 'llama-3.2-1b')
   const prompt = String(req.body.prompt || '').slice(0, 2000)
   const system = String(req.body.system || '').slice(0, 2000)
   const temperature = Number.isFinite(Number(req.body.temperature)) ? Number(req.body.temperature) : 0.7
