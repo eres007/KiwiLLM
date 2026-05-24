@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import pg from 'pg'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -67,6 +68,258 @@ let warnedAboutDb = false
 let postgresReady = false
 const legacyDemoKeyNames = new Set(['Production agents', 'Design playground'])
 const legacyDemoRedemptions = new Set(['KIWI-DEMO-2026', 'KIWI-TEAM-LAUNCH'])
+
+function keyHash(value) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function pgWorkspaceToPayload(workspace, totals = {}) {
+  const credits = Number(workspace.credit_balance || 0)
+  const creditUsd = Number(workspace.credit_usd_balance || 0)
+  const usedCredits30d = Number(totals.credits_used || 0)
+  return {
+    email: workspace.email || workspaceEmail,
+    credits,
+    creditUsd,
+    usedCredits30d,
+    usedUsd30d: Number((usedCredits30d / 50).toFixed(2)),
+    requests30d: Number(totals.requests || 0),
+    tokens30d: Number(totals.total_tokens || 0),
+  }
+}
+
+async function getDefaultWorkspace(client = pgPool) {
+  if (!client) return null
+
+  let result = await client.query('select * from workspaces order by created_at asc limit 1')
+  if (result.rowCount) return result.rows[0]
+
+  const userResult = await client.query(
+    `
+      insert into app_users (email, name, role)
+      values ($1, $2, 'admin')
+      on conflict (email) do update set email = excluded.email
+      returning *
+    `,
+    [workspaceEmail, 'Kiwi Admin'],
+  )
+  result = await client.query(
+    `
+      insert into workspaces (name, email, owner_user_id, plan, free_rpm_limit, free_rpd_limit)
+      values ('Kiwi Workspace', $1, $2, 'free', $3, $4)
+      returning *
+    `,
+    [workspaceEmail, userResult.rows[0].id, freeRpmLimit, freeRpdLimit],
+  )
+  return result.rows[0]
+}
+
+function pgKeyToPayload(row, fullKey = null) {
+  return {
+    id: row.id,
+    name: row.name,
+    key: fullKey || row.key_preview,
+    scope: row.scope,
+    models: row.allowed_models || [],
+    plan: row.plan || 'free',
+    lastUsed: row.last_used_at ? new Date(row.last_used_at).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) : 'Never',
+    createdAt: row.created_at,
+  }
+}
+
+async function findPgKey(value = '') {
+  if (!pgPool || (!value.startsWith(`${kiwiApiPrefix}_`) && !value.startsWith('kiwi_sk_'))) return null
+  if (process.env.KIWI_MASTER_KEY && value === process.env.KIWI_MASTER_KEY) {
+    const workspace = await getDefaultWorkspace()
+    return { id: 'master', workspace_id: workspace.id, name: 'Master key', key: value, plan: 'admin', allowed_models: [] }
+  }
+
+  const result = await pgPool.query(
+    `
+      select api_keys.*, workspaces.free_rpm_limit, workspaces.free_rpd_limit
+      from api_keys
+      join workspaces on workspaces.id = api_keys.workspace_id
+      where api_keys.key_hash = $1 and api_keys.revoked_at is null
+      limit 1
+    `,
+    [keyHash(value)],
+  )
+  return result.rows[0] || null
+}
+
+async function createPgKey({ name, selectedModels }) {
+  const workspace = await getDefaultWorkspace()
+  const key = keyValue()
+  const scope = selectedModels.length > 3 ? `${selectedModels.length} models` : selectedModels.length ? selectedModels.join(', ') : 'All live models'
+  const result = await pgPool.query(
+    `
+      insert into api_keys (workspace_id, name, key_prefix, key_hash, key_preview, plan, scope, allowed_models)
+      values ($1, $2, $3, $4, $5, 'free', $6, $7)
+      returning *
+    `,
+    [workspace.id, name, kiwiApiPrefix, keyHash(key), publicKey(key), scope, selectedModels],
+  )
+  return pgKeyToPayload(result.rows[0], key)
+}
+
+async function checkPgFreeRateLimit(key) {
+  if (!pgPool || (key.plan || 'free') !== 'free') return null
+
+  const rpm = Number(key.free_rpm_limit || freeRpmLimit)
+  const rpd = Number(key.free_rpd_limit || freeRpdLimit)
+  const result = await pgPool.query(
+    `
+      select
+        count(*) filter (where created_at >= now() - interval '60 seconds') as minute_count,
+        count(*) filter (where created_at >= date_trunc('day', now())) as day_count
+      from rate_limit_events
+      where api_key_id = $1
+    `,
+    [key.id],
+  )
+  const minuteCount = Number(result.rows[0]?.minute_count || 0)
+  const dayCount = Number(result.rows[0]?.day_count || 0)
+
+  if (minuteCount >= rpm) return { status: 429, error: `Free plan limit reached: ${rpm} requests per minute.`, retryAfter: 60 }
+  if (dayCount >= rpd) return { status: 429, error: `Free plan limit reached: ${rpd} requests per day.`, retryAfter: 86400 }
+
+  await pgPool.query(
+    'insert into rate_limit_events (api_key_id, workspace_id) values ($1, $2)',
+    [key.id, key.workspace_id],
+  )
+  return null
+}
+
+async function recordPgUsage({ key, model, endpoint, usage, statusCode = 200 }) {
+  if (!pgPool) return
+
+  const totalTokens = Number(usage.totalTokens || 0)
+  const inputTokens = Number(usage.inputTokens || 0)
+  const outputTokens = Number(usage.outputTokens || 0)
+  const credits = creditCost(totalTokens)
+  const usd = modelSpendUsd(model, totalTokens)
+  const today = todayKey()
+
+  await pgPool.query('begin')
+  try {
+    await pgPool.query(
+      `
+        insert into usage_events (
+          workspace_id, api_key_id, model, endpoint, input_tokens, output_tokens,
+          total_tokens, credits_used, usd_estimate, status_code
+        )
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `,
+      [key.workspace_id, key.id === 'master' ? null : key.id, model, endpoint, inputTokens, outputTokens, totalTokens, credits, usd, statusCode],
+    )
+    await pgPool.query(
+      `
+        insert into daily_usage (workspace_id, usage_date, requests, input_tokens, output_tokens, total_tokens, credits_used, usd_estimate)
+        values ($1, $2, 1, $3, $4, $5, $6, $7)
+        on conflict (workspace_id, usage_date)
+        do update set
+          requests = daily_usage.requests + 1,
+          input_tokens = daily_usage.input_tokens + excluded.input_tokens,
+          output_tokens = daily_usage.output_tokens + excluded.output_tokens,
+          total_tokens = daily_usage.total_tokens + excluded.total_tokens,
+          credits_used = daily_usage.credits_used + excluded.credits_used,
+          usd_estimate = daily_usage.usd_estimate + excluded.usd_estimate
+      `,
+      [key.workspace_id, today, inputTokens, outputTokens, totalTokens, credits, usd],
+    )
+    await pgPool.query(
+      `
+        insert into model_usage (workspace_id, model, usage_date, requests, total_tokens, credits_used, usd_estimate)
+        values ($1, $2, $3, 1, $4, $5, $6)
+        on conflict (workspace_id, model, usage_date)
+        do update set
+          requests = model_usage.requests + 1,
+          total_tokens = model_usage.total_tokens + excluded.total_tokens,
+          credits_used = model_usage.credits_used + excluded.credits_used,
+          usd_estimate = model_usage.usd_estimate + excluded.usd_estimate
+      `,
+      [key.workspace_id, model, today, totalTokens, credits, usd],
+    )
+    if (key.id !== 'master') {
+      await pgPool.query('update api_keys set last_used_at = now() where id = $1', [key.id])
+    }
+    await pgPool.query('commit')
+  } catch (error) {
+    await pgPool.query('rollback')
+    throw error
+  }
+}
+
+async function getPgDashboard() {
+  const workspace = await getDefaultWorkspace()
+  const totalsResult = await pgPool.query(
+    `
+      select
+        coalesce(sum(requests), 0) as requests,
+        coalesce(sum(total_tokens), 0) as total_tokens,
+        coalesce(sum(credits_used), 0) as credits_used,
+        coalesce(sum(usd_estimate), 0) as usd_estimate
+      from daily_usage
+      where workspace_id = $1 and usage_date >= current_date - interval '29 days'
+    `,
+    [workspace.id],
+  )
+  const totals = totalsResult.rows[0] || {}
+  const workspacePayload = pgWorkspaceToPayload(workspace, totals)
+  const days = lastDayKeys(12)
+  const dailyResult = await pgPool.query(
+    'select usage_date, requests, total_tokens from daily_usage where workspace_id = $1 and usage_date >= current_date - interval \'11 days\'',
+    [workspace.id],
+  )
+  const dailyMap = new Map(dailyResult.rows.map((row) => [sqlDateKey(row.usage_date), row]))
+  const tokenValues = days.map((day) => Number(dailyMap.get(day)?.total_tokens || 0))
+  const requestValues = days.map((day) => Number(dailyMap.get(day)?.requests || 0))
+  const modelResult = await pgPool.query(
+    `
+      select model, sum(requests) as requests, sum(usd_estimate) as spend
+      from model_usage
+      where workspace_id = $1 and usage_date >= current_date - interval '29 days'
+      group by model
+      order by spend desc, requests desc
+      limit 8
+    `,
+    [workspace.id],
+  )
+  const maxSpend = Math.max(...modelResult.rows.map((row) => Number(row.spend)), 0.0001)
+  const keysResult = await pgPool.query(
+    'select * from api_keys where workspace_id = $1 and revoked_at is null order by created_at desc',
+    [workspace.id],
+  )
+
+  return {
+    workspace: workspacePayload,
+    usage: {
+      tokenBars: toBarValues(tokenValues),
+      requestBars: toBarValues(requestValues),
+      spendByModel: modelResult.rows.map((row) => ({
+        model: row.model,
+        requests: Number(row.requests),
+        spend: Number(row.spend),
+        width: Math.max(4, Math.round((Number(row.spend) / maxSpend) * 100)),
+      })),
+    },
+    keys: keysResult.rows.map((row) => pgKeyToPayload(row)),
+    limits: {
+      plan: workspace.plan === 'free' ? 'Free' : workspace.plan,
+      rpm: Number(workspace.free_rpm_limit || freeRpmLimit),
+      rpd: Number(workspace.free_rpd_limit || freeRpdLimit),
+    },
+  }
+}
+
+async function getPgRuns() {
+  const workspace = await getDefaultWorkspace()
+  const result = await pgPool.query(
+    'select title, model, total_tokens as tokens, created_at from playground_runs where workspace_id = $1 order by created_at desc limit 20',
+    [workspace.id],
+  )
+  return result.rows
+}
 
 async function ensurePostgres() {
   if (!pgPool || postgresReady) return
@@ -234,6 +487,8 @@ function keyValue() {
 }
 
 async function findKiwiKey(value = '') {
+  if (pgPool) return findPgKey(value)
+
   if (!value.startsWith(`${kiwiApiPrefix}_`) && !value.startsWith('kiwi_sk_')) {
     return null
   }
@@ -256,7 +511,14 @@ function getBearer(req) {
 }
 
 function todayKey(date = new Date()) {
-  return date.toISOString().slice(0, 10)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function sqlDateKey(value) {
+  return typeof value === 'string' ? value.slice(0, 10) : todayKey(new Date(value))
 }
 
 function lastDayKeys(count) {
@@ -489,14 +751,22 @@ async function proxyWorker(req, res, workerPath) {
     return res.status(401).json({ error: `Missing or invalid ${kiwiApiPrefix} API key.` })
   }
 
-  const db = await readDb()
-  const rateLimit = checkFreeRateLimit(db, key)
-  if (rateLimit) {
-    res.set('Retry-After', String(rateLimit.retryAfter))
+  if (pgPool) {
+    const rateLimit = await checkPgFreeRateLimit(key)
+    if (rateLimit) {
+      res.set('Retry-After', String(rateLimit.retryAfter))
+      return res.status(rateLimit.status).json({ error: rateLimit.error })
+    }
+  } else {
+    const db = await readDb()
+    const rateLimit = checkFreeRateLimit(db, key)
+    if (rateLimit) {
+      res.set('Retry-After', String(rateLimit.retryAfter))
+      await writeDb(db)
+      return res.status(rateLimit.status).json({ error: rateLimit.error })
+    }
     await writeDb(db)
-    return res.status(rateLimit.status).json({ error: rateLimit.error })
   }
-  await writeDb(db)
 
   const headers = {
     'Content-Type': 'application/json',
@@ -521,28 +791,46 @@ async function proxyWorker(req, res, workerPath) {
     if (contentType.includes('application/json')) {
       const payload = await response.json()
       if (response.ok) {
-        const latestDb = await readDb()
         const usage = usageFromPayload(payload, req.body || {})
         const model = payload.model || req.body?.model || workerPath.replace('/v1/', '')
-        recordMeteredUsage(latestDb, {
-          keyValue: userKey,
-          model,
-          tokens: workerPath === '/v1/models' ? 0 : usage.totalTokens,
-        })
-        await writeDb(latestDb)
+        if (pgPool) {
+          await recordPgUsage({
+            key,
+            model,
+            endpoint: workerPath,
+            usage: workerPath === '/v1/models' ? { inputTokens: 0, outputTokens: 0, totalTokens: 0 } : usage,
+            statusCode: response.status,
+          })
+        } else {
+          const latestDb = await readDb()
+          recordMeteredUsage(latestDb, {
+            keyValue: userKey,
+            model,
+            tokens: workerPath === '/v1/models' ? 0 : usage.totalTokens,
+          })
+          await writeDb(latestDb)
+        }
       }
       return res.json(payload)
     }
 
     const text = await response.text()
     if (response.ok) {
-      const latestDb = await readDb()
-      recordMeteredUsage(latestDb, {
-        keyValue: userKey,
-        model: req.body?.model || workerPath.replace('/v1/', ''),
-        tokens: workerPath === '/v1/models' ? 0 : estimateTokensFromRequest(req.body || {}),
-      })
-      await writeDb(latestDb)
+      const model = req.body?.model || workerPath.replace('/v1/', '')
+      const tokens = workerPath === '/v1/models' ? 0 : estimateTokensFromRequest(req.body || {})
+      if (pgPool) {
+        await recordPgUsage({
+          key,
+          model,
+          endpoint: workerPath,
+          usage: { inputTokens: tokens, outputTokens: 0, totalTokens: tokens },
+          statusCode: response.status,
+        })
+      } else {
+        const latestDb = await readDb()
+        recordMeteredUsage(latestDb, { keyValue: userKey, model, tokens })
+        await writeDb(latestDb)
+      }
     }
     return res.send(text)
   } catch (error) {
@@ -555,6 +843,23 @@ async function proxyWorker(req, res, workerPath) {
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'Kiwi LLM API', version: 'worker-proxy-db-fallback' })
+})
+
+app.get('/api/ready', async (_req, res) => {
+  try {
+    if (pgPool) {
+      await pgPool.query('select 1')
+      return res.json({ ok: true, database: 'postgres' })
+    }
+
+    await readDb()
+    return res.json({ ok: true, database: 'local-json' })
+  } catch (error) {
+    return res.status(503).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Readiness check failed',
+    })
+  }
 })
 
 app.get('/api/models', async (_req, res) => {
@@ -601,6 +906,19 @@ app.post('/v1/video/generations', (req, res) => {
 })
 
 app.get('/api/dashboard', async (_req, res) => {
+  if (pgPool) {
+    const data = await getPgDashboard()
+    return res.json({
+      ...data,
+      stats: [
+        { label: 'Credit balance', value: data.workspace.credits.toLocaleString(), note: `$${data.workspace.creditUsd.toFixed(2)} available`, trend: 'Live' },
+        { label: 'Requests', value: data.workspace.requests30d.toLocaleString(), note: 'Last 30 days', trend: 'Live' },
+        { label: 'Tokens', value: formatTokens(data.workspace.tokens30d), note: 'Input + output', trend: 'Live' },
+        { label: 'Credits used', value: data.workspace.usedCredits30d.toLocaleString(), note: 'Last 30 days', trend: 'Live' },
+      ],
+    })
+  }
+
   const db = await readDb()
   refreshWorkspaceTotals(db)
   await writeDb(db)
@@ -624,6 +942,41 @@ app.get('/api/dashboard', async (_req, res) => {
 
 app.post('/api/redeem', async (req, res) => {
   const code = String(req.body.code || '').trim().toUpperCase()
+  if (pgPool) {
+    const workspace = await getDefaultWorkspace()
+    const result = await pgPool.query(
+      `
+        select * from redemption_codes
+        where code = $1
+          and redeemed_count < max_redemptions
+          and (expires_at is null or expires_at > now())
+        limit 1
+      `,
+      [code],
+    )
+    const redemption = result.rows[0]
+    if (!redemption) return res.status(404).json({ error: 'Invalid or already used Kiwi code.' })
+
+    await pgPool.query('begin')
+    try {
+      await pgPool.query('update redemption_codes set redeemed_count = redeemed_count + 1 where id = $1', [redemption.id])
+      await pgPool.query('insert into redemption_uses (redemption_code_id, workspace_id) values ($1, $2)', [redemption.id, workspace.id])
+      await pgPool.query(
+        'insert into credit_transactions (workspace_id, type, credits, description) values ($1, $2, $3, $4)',
+        [workspace.id, 'redeem', Number(redemption.credits), `Redeemed ${code}`],
+      )
+      await pgPool.query(
+        'update workspaces set credit_balance = credit_balance + $1, credit_usd_balance = credit_usd_balance + $2 where id = $3',
+        [Number(redemption.credits), Number(redemption.credits) / 50, workspace.id],
+      )
+      await pgPool.query('commit')
+      return res.json({ ok: true, creditsAdded: Number(redemption.credits) })
+    } catch (error) {
+      await pgPool.query('rollback')
+      throw error
+    }
+  }
+
   const db = await readDb()
   const credits = db.redemptions[code]
 
@@ -639,15 +992,21 @@ app.post('/api/redeem', async (req, res) => {
 })
 
 app.post('/api/keys', async (req, res) => {
-  const db = await readDb()
   const name = String(req.body.name || 'Untitled key').trim().slice(0, 80)
-  const selectedModels = Array.isArray(req.body.models) && req.body.models.length ? req.body.models : ['gpt-frontier']
+  const selectedModels = Array.isArray(req.body.models) && req.body.models.length ? req.body.models : []
+
+  if (pgPool) {
+    const item = await createPgKey({ name, selectedModels })
+    return res.status(201).json({ ...item, displayKey: publicKey(item.key) })
+  }
+
+  const db = await readDb()
   const key = keyValue()
   const item = {
     id: crypto.randomUUID(),
     name,
     key,
-    scope: selectedModels.length > 3 ? `${selectedModels.length} models` : selectedModels.join(', '),
+    scope: selectedModels.length > 3 ? `${selectedModels.length} models` : selectedModels.length ? selectedModels.join(', ') : 'All live models',
     models: selectedModels,
     plan: 'free',
     lastUsed: 'Never',
@@ -660,7 +1019,6 @@ app.post('/api/keys', async (req, res) => {
 })
 
 app.post('/api/playground/run', async (req, res) => {
-  const db = await readDb()
   const model = String(req.body.model || 'gpt-frontier')
   const prompt = String(req.body.prompt || '').slice(0, 2000)
   const system = String(req.body.system || '').slice(0, 2000)
@@ -710,10 +1068,29 @@ app.post('/api/playground/run', async (req, res) => {
       response: responseText,
     }
 
-    db.runs.unshift(run)
-    db.runs = db.runs.slice(0, 20)
-    recordMeteredUsage(db, { keyValue: '', model, tokens: usage.totalTokens, requests: 1 })
-    await writeDb(db)
+    if (pgPool) {
+      const workspace = await getDefaultWorkspace()
+      await pgPool.query(
+        `
+          insert into playground_runs (workspace_id, model, title, prompt, system_prompt, response, total_tokens, usd_estimate)
+          values ($1, $2, $3, $4, $5, $6, $7, $8)
+        `,
+        [workspace.id, model, run.title, prompt, system, responseText, usage.totalTokens, spend],
+      )
+      await recordPgUsage({
+        key: { id: 'master', workspace_id: workspace.id, plan: 'admin' },
+        model,
+        endpoint: '/api/playground/run',
+        usage,
+        statusCode: 200,
+      })
+    } else {
+      const db = await readDb()
+      db.runs.unshift(run)
+      db.runs = db.runs.slice(0, 20)
+      recordMeteredUsage(db, { keyValue: '', model, tokens: usage.totalTokens, requests: 1 })
+      await writeDb(db)
+    }
     res.json(run)
   } catch (error) {
     return res.status(502).json({
@@ -723,6 +1100,10 @@ app.post('/api/playground/run', async (req, res) => {
 })
 
 app.get('/api/playground/runs', async (_req, res) => {
+  if (pgPool) {
+    return res.json({ runs: await getPgRuns() })
+  }
+
   const db = await readDb()
   res.json({ runs: db.runs })
 })
