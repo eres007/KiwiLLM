@@ -2348,6 +2348,47 @@ code b {
   opacity: 0.58;
 }
 
+.admin-code-panel {
+  grid-row: span 2;
+}
+
+.admin-code-form {
+  display: grid;
+  margin-top: 22px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-code-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.admin-code-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+  font: 14px var(--sans);
+}
+
+.admin-code-form button,
+.admin-code-form p {
+  grid-column: 1 / -1;
+}
+
+.admin-code-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .models-shell {
   max-width: 1180px;
   margin: 0 auto;
@@ -2914,6 +2955,10 @@ code b {
   .admin-status-panel {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .admin-code-form {
+    grid-template-columns: 1fr;
   }
 }
 

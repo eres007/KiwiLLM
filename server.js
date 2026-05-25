@@ -105,6 +105,7 @@ let memoryDb = structuredClone(seedDb)
 let warnedAboutDb = false
 let postgresReady = false
 let auditReady = false
+let redemptionReady = false
 const legacyDemoKeyNames = new Set(['Production agents', 'Design playground'])
 const legacyDemoRedemptions = new Set(['KIWI-DEMO-2026', 'KIWI-TEAM-LAUNCH'])
 
@@ -463,6 +464,30 @@ async function ensureAuditTable() {
   auditReady = true
 }
 
+async function ensureRedemptionTables() {
+  if (!pgPool || redemptionReady) return
+  await pgPool.query(`
+    create table if not exists redemption_codes (
+      id uuid primary key default gen_random_uuid(),
+      code text unique not null,
+      credits numeric not null,
+      max_redemptions integer not null default 1,
+      redeemed_count integer not null default 0,
+      expires_at timestamptz,
+      created_at timestamptz not null default now()
+    )
+  `)
+  await pgPool.query(`
+    create table if not exists redemption_uses (
+      id uuid primary key default gen_random_uuid(),
+      redemption_code_id uuid references redemption_codes(id),
+      workspace_id uuid,
+      created_at timestamptz not null default now()
+    )
+  `)
+  redemptionReady = true
+}
+
 async function recordAuditEvent({ workspace, authUser, action, metadata = {} }) {
   if (!pgPool) return
   try {
@@ -503,11 +528,20 @@ async function getAdminOverview() {
       usageByModel: db.usage.spendByModel || [],
       audit: [],
       runs: db.runs.slice(0, 20),
+      redemptionCodes: Object.entries(db.redemptions || {}).map(([code, credits]) => ({
+        code,
+        credits,
+        maxRedemptions: 1,
+        redeemedCount: 0,
+        expiresAt: null,
+        createdAt: null,
+      })),
     }
   }
 
   await ensureAuditTable()
-  const [workspaceCount, userCount, keyCounts, usageTotals, modelUsage, auditEvents, runs, recentKeys] = await Promise.all([
+  await ensureRedemptionTables()
+  const [workspaceCount, userCount, keyCounts, usageTotals, modelUsage, auditEvents, runs, recentKeys, redemptionCodes] = await Promise.all([
     pgPool.query('select count(*)::int as count from workspaces'),
     pgPool.query('select count(*)::int as count from app_users'),
     pgPool.query(`
@@ -552,6 +586,12 @@ async function getAdminOverview() {
       order by api_keys.created_at desc
       limit 25
     `),
+    pgPool.query(`
+      select code, credits, max_redemptions, redeemed_count, expires_at, created_at
+      from redemption_codes
+      order by created_at desc
+      limit 25
+    `),
   ])
 
   return {
@@ -592,6 +632,14 @@ async function getAdminOverview() {
       lastUsed: row.last_used_at,
       createdAt: row.created_at,
       revoked: Boolean(row.revoked_at),
+    })),
+    redemptionCodes: redemptionCodes.rows.map((row) => ({
+      code: row.code,
+      credits: Number(row.credits || 0),
+      maxRedemptions: Number(row.max_redemptions || 0),
+      redeemedCount: Number(row.redeemed_count || 0),
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
     })),
   }
 }
@@ -1182,6 +1230,60 @@ app.post('/api/admin/login', (req, res) => {
 
 app.get('/api/admin/overview', requireAdmin, async (_req, res) => {
   res.json(await getAdminOverview())
+})
+
+app.post('/api/admin/redemption-codes', requireAdmin, async (req, res) => {
+  const rawCode = String(req.body.code || '').trim().toUpperCase()
+  const code = rawCode || `KIWI-${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`
+  const credits = Number(req.body.credits || 0)
+  const maxRedemptions = Math.max(1, Math.floor(Number(req.body.maxRedemptions || 1)))
+  const expiresAt = req.body.expiresAt ? new Date(String(req.body.expiresAt)) : null
+
+  if (!Number.isFinite(credits) || credits <= 0) {
+    return res.status(400).json({ error: 'Credits must be greater than zero.' })
+  }
+  if (expiresAt && Number.isNaN(expiresAt.getTime())) {
+    return res.status(400).json({ error: 'Expiry date is invalid.' })
+  }
+
+  if (pgPool) {
+    await ensureRedemptionTables()
+    let result
+    try {
+      result = await pgPool.query(
+        `
+          insert into redemption_codes (code, credits, max_redemptions, expires_at)
+          values ($1, $2, $3, $4)
+          returning code, credits, max_redemptions, redeemed_count, expires_at, created_at
+        `,
+        [code, credits, maxRedemptions, expiresAt ? expiresAt.toISOString() : null],
+      )
+    } catch (error) {
+      if (error?.code === '23505') return res.status(409).json({ error: 'Code already exists.' })
+      throw error
+    }
+    await recordAuditEvent({
+      workspace: null,
+      authUser: req.authUser,
+      action: 'create_redemption_code',
+      metadata: { code, credits, maxRedemptions, expiresAt: expiresAt ? expiresAt.toISOString() : null },
+    })
+    const row = result.rows[0]
+    return res.status(201).json({
+      code: row.code,
+      credits: Number(row.credits),
+      maxRedemptions: Number(row.max_redemptions),
+      redeemedCount: Number(row.redeemed_count),
+      expiresAt: row.expires_at,
+      createdAt: row.created_at,
+    })
+  }
+
+  const db = await readDb()
+  if (db.redemptions[code]) return res.status(409).json({ error: 'Code already exists.' })
+  db.redemptions[code] = credits
+  await writeDb(db)
+  res.status(201).json({ code, credits, maxRedemptions: 1, redeemedCount: 0, expiresAt: null, createdAt: new Date().toISOString() })
 })
 
 app.get('/v1/models', (req, res) => {

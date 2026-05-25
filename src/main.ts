@@ -380,7 +380,15 @@ let resolveAuthReady: () => void = () => {}
 const authReady = new Promise<void>((resolve) => {
   resolveAuthReady = resolve
 })
-const protectedApiPaths = new Set(['/api/dashboard', '/api/redeem', '/api/keys', '/api/playground/run', '/api/playground/runs', '/api/admin/overview'])
+const protectedApiPaths = new Set([
+  '/api/dashboard',
+  '/api/redeem',
+  '/api/keys',
+  '/api/playground/run',
+  '/api/playground/runs',
+  '/api/admin/overview',
+  '/api/admin/redemption-codes',
+])
 
 const isProtectedApiPath = (path: string) => protectedApiPaths.has(path) || /^\/api\/keys\/[^/]+\/revoke$/.test(path)
 const adminToken = () => window.sessionStorage.getItem('kiwi_admin_token') || ''
@@ -1274,6 +1282,37 @@ const renderAdmin = () => `
           <div class="admin-list" id="admin-keys"></div>
         </article>
 
+        <article class="dash-panel admin-code-panel">
+          <div class="dash-panel-head">
+            <div>
+              <h2>Create Kiwi code</h2>
+              <p>Credits, expiry, and redemption limit</p>
+            </div>
+            <span id="admin-code-count">Locked</span>
+          </div>
+          <form class="admin-code-form" id="admin-code-form">
+            <label>
+              Code
+              <input id="admin-code" type="text" placeholder="Auto-generate if empty" />
+            </label>
+            <label>
+              Credits
+              <input id="admin-code-credits" type="number" min="1" step="1" value="100" />
+            </label>
+            <label>
+              Max users
+              <input id="admin-code-max" type="number" min="1" step="1" value="1" />
+            </label>
+            <label>
+              Expiry
+              <input id="admin-code-expiry" type="datetime-local" />
+            </label>
+            <button class="button button-primary" type="submit">Create code</button>
+            <p id="admin-code-message">Create invite, promo, or manual credit codes.</p>
+          </form>
+          <div class="admin-list" id="admin-codes"></div>
+        </article>
+
         <article class="dash-panel">
           <div class="dash-panel-head">
             <div>
@@ -1806,6 +1845,7 @@ if (isAdminPage) {
     keys: Array<{ name: string; workspace: string; preview: string; scope: string; lastUsed: string | null; createdAt: string; revoked: boolean }>
     audit: Array<{ actor: string; action: string; metadata: Record<string, unknown>; createdAt: string }>
     runs: Array<{ title: string; model: string; tokens: number; createdAt: string }>
+    redemptionCodes: Array<{ code: string; credits: number; maxRedemptions: number; redeemedCount: number; expiresAt: string | null; createdAt: string | null }>
   }
 
   const adminDate = (value: string | null) => (value ? new Date(value).toLocaleString() : 'Never')
@@ -1826,6 +1866,7 @@ if (isAdminPage) {
       setAdminStatus('Sign in required', 'Sign in with kiwi@admin.in to load admin data.')
       adminListEmpty('#admin-model-usage', 'Admin data is locked.')
       adminListEmpty('#admin-keys', 'Admin data is locked.')
+      adminListEmpty('#admin-codes', 'Admin data is locked.')
       adminListEmpty('#admin-audit', 'Admin data is locked.')
       adminListEmpty('#admin-runs', 'Admin data is locked.')
       return
@@ -1901,6 +1942,24 @@ if (isAdminPage) {
           : '<p class="empty-state">No audit events yet.</p>'
       }
 
+      const codes = document.querySelector<HTMLElement>('#admin-codes')
+      if (codes) {
+        codes.innerHTML = data.redemptionCodes.length
+          ? data.redemptionCodes
+              .map((item) => {
+                const expired = item.expiresAt ? new Date(item.expiresAt).getTime() < Date.now() : false
+                return `
+                  <div class="admin-list-row ${expired ? 'is-muted' : ''}">
+                    <strong>${escapeHtml(item.code)}</strong>
+                    <span>${item.credits.toLocaleString()} credits · ${item.redeemedCount.toLocaleString()}/${item.maxRedemptions.toLocaleString()} redeemed</span>
+                    <small>Expires ${item.expiresAt ? adminDate(item.expiresAt) : 'never'} · created ${adminDate(item.createdAt)}</small>
+                  </div>
+                `
+              })
+              .join('')
+          : '<p class="empty-state">No Kiwi codes created yet.</p>'
+      }
+
       const runs = document.querySelector<HTMLElement>('#admin-runs')
       if (runs) {
         runs.innerHTML = data.runs.length
@@ -1922,10 +1981,12 @@ if (isAdminPage) {
       const keyCount = document.querySelector<HTMLElement>('#admin-key-count')
       const auditCount = document.querySelector<HTMLElement>('#admin-audit-count')
       const runCount = document.querySelector<HTMLElement>('#admin-run-count')
+      const codeCount = document.querySelector<HTMLElement>('#admin-code-count')
       if (modelCount) modelCount.textContent = `${data.usageByModel.length} models`
       if (keyCount) keyCount.textContent = `${data.keys.length} keys`
       if (auditCount) auditCount.textContent = `${data.audit.length} events`
       if (runCount) runCount.textContent = `${data.runs.length} runs`
+      if (codeCount) codeCount.textContent = `${data.redemptionCodes.length} codes`
     } catch (error) {
       setAdminStatus('Access blocked', error instanceof Error ? error.message : 'Could not load admin data.')
     }
@@ -1948,6 +2009,31 @@ if (isAdminPage) {
     } catch (error) {
       if (message) message.textContent = error instanceof Error ? error.message : 'Admin sign in failed.'
       return
+    }
+  })
+
+  document.querySelector<HTMLFormElement>('#admin-code-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const message = document.querySelector<HTMLElement>('#admin-code-message')
+    const codeInput = document.querySelector<HTMLInputElement>('#admin-code')
+    const credits = Number(document.querySelector<HTMLInputElement>('#admin-code-credits')?.value || 0)
+    const maxRedemptions = Number(document.querySelector<HTMLInputElement>('#admin-code-max')?.value || 1)
+    const expiresAt = document.querySelector<HTMLInputElement>('#admin-code-expiry')?.value || ''
+    try {
+      const created = await api<{ code: string; credits: number; maxRedemptions: number }>('/api/admin/redemption-codes', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: codeInput?.value,
+          credits,
+          maxRedemptions,
+          expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+        }),
+      })
+      if (message) message.textContent = `Created ${created.code} for ${created.credits.toLocaleString()} credits.`
+      if (codeInput) codeInput.value = ''
+      await hydrateAdmin()
+    } catch (error) {
+      if (message) message.textContent = error instanceof Error ? error.message : 'Could not create code.'
     }
   })
 
