@@ -380,7 +380,7 @@ let resolveAuthReady: () => void = () => {}
 const authReady = new Promise<void>((resolve) => {
   resolveAuthReady = resolve
 })
-const protectedApiPaths = new Set(['/api/dashboard', '/api/redeem', '/api/keys', '/api/playground/run', '/api/playground/runs'])
+const protectedApiPaths = new Set(['/api/dashboard', '/api/redeem', '/api/keys', '/api/playground/run', '/api/playground/runs', '/api/admin/overview'])
 
 const isProtectedApiPath = (path: string) => protectedApiPaths.has(path) || /^\/api\/keys\/[^/]+\/revoke$/.test(path)
 
@@ -1194,11 +1194,115 @@ const renderPlayground = () => `
   </main>
 `
 
+const renderAdmin = () => `
+  <main class="dashboard-page admin-page">
+    <header class="dash-nav">
+      <a class="footer-brand" href="/" aria-label="Kiwi LLM home">
+        ${brandMark}
+        <span>Kiwi LLM</span>
+      </a>
+      <nav>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/models">Models</a>
+        <a href="/docs">Docs</a>
+        <a href="/">Home</a>
+      </nav>
+      <div class="dash-account">${authAccountMarkup()}</div>
+    </header>
+
+    <section class="dash-shell admin-shell">
+      <div class="dash-hero">
+        <div>
+          <p class="section-kicker">ADMIN</p>
+          <h1>Kiwi control, <em>center</em></h1>
+          <p>Monitor workspaces, API keys, usage, model spend, audit events, and playground activity from one protected admin view.</p>
+        </div>
+        <form class="admin-login-card" id="admin-login-form">
+          <span>Admin sign in</span>
+          <input id="admin-email" type="email" value="kiwi@admin.in" autocomplete="username" aria-label="Admin email" />
+          <input id="admin-password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Admin password" />
+          <button class="button button-primary" type="submit">Sign in</button>
+          <p id="admin-login-message">Use the admin Supabase account to unlock this page.</p>
+        </form>
+      </div>
+
+      <section class="admin-status-panel">
+        <div>
+          <span>Access</span>
+          <strong id="admin-access-state">Checking session</strong>
+        </div>
+        <p id="admin-access-note">Admin data is only loaded after the backend verifies your Supabase user.</p>
+      </section>
+
+      <section class="dash-stats admin-stats" aria-label="Admin statistics">
+        ${['Workspaces', 'Users', 'Active keys', 'Requests 30d', 'Tokens 30d', 'Credits used']
+          .map(
+            (label) => `
+              <article>
+                <div><span>${label}</span><b>Live</b></div>
+                <strong data-admin-stat="${label}">...</strong>
+                <p>Loading admin data</p>
+              </article>
+            `,
+          )
+          .join('')}
+      </section>
+
+      <section class="admin-grid">
+        <article class="dash-panel">
+          <div class="dash-panel-head">
+            <div>
+              <h2>Usage by model</h2>
+              <p>Last 30 days</p>
+            </div>
+            <span id="admin-model-count">Loading</span>
+          </div>
+          <div class="admin-list" id="admin-model-usage"></div>
+        </article>
+
+        <article class="dash-panel">
+          <div class="dash-panel-head">
+            <div>
+              <h2>Recent API keys</h2>
+              <p>Newest workspace keys</p>
+            </div>
+            <span id="admin-key-count">Loading</span>
+          </div>
+          <div class="admin-list" id="admin-keys"></div>
+        </article>
+
+        <article class="dash-panel">
+          <div class="dash-panel-head">
+            <div>
+              <h2>Audit events</h2>
+              <p>Admin-visible security trail</p>
+            </div>
+            <span id="admin-audit-count">Loading</span>
+          </div>
+          <div class="admin-list" id="admin-audit"></div>
+        </article>
+
+        <article class="dash-panel">
+          <div class="dash-panel-head">
+            <div>
+              <h2>Playground runs</h2>
+              <p>Latest tested prompts</p>
+            </div>
+            <span id="admin-run-count">Loading</span>
+          </div>
+          <div class="admin-list" id="admin-runs"></div>
+        </article>
+      </section>
+    </section>
+  </main>
+`
+
 const app = document.querySelector<HTMLDivElement>('#app')!
 const isDocsPage = window.location.pathname === '/docs'
 const isDashboardPage = window.location.pathname === '/dashboard'
 const isModelsPage = window.location.pathname === '/models'
 const isPlaygroundPage = window.location.pathname === '/playground'
+const isAdminPage = window.location.pathname === '/admin'
 document.title = isDocsPage
   ? 'Docs - Kiwi LLM'
   : isDashboardPage
@@ -1207,7 +1311,9 @@ document.title = isDocsPage
       ? 'Models - Kiwi LLM'
       : isPlaygroundPage
         ? 'Playground - Kiwi LLM'
-        : 'Kiwi LLM'
+        : isAdminPage
+          ? 'Admin - Kiwi LLM'
+          : 'Kiwi LLM'
 app.innerHTML = isDocsPage
   ? renderDocs()
   : isDashboardPage
@@ -1216,7 +1322,9 @@ app.innerHTML = isDocsPage
       ? renderModels()
       : isPlaygroundPage
         ? renderPlayground()
-        : renderHome()
+        : isAdminPage
+          ? renderAdmin()
+          : renderHome()
 
 document.body.insertAdjacentHTML(
   'beforeend',
@@ -1293,7 +1401,7 @@ const syncAuthUi = (session: Session | null) => {
   if (dashboardName) dashboardName.textContent = session ? profile.name : 'builder'
   const dashboardGreetingNode = document.querySelector<HTMLElement>('#dashboard-greeting')
   if (dashboardGreetingNode) dashboardGreetingNode.textContent = dashboardGreeting()
-  if (isDashboardPage) {
+  if (isDashboardPage || isAdminPage) {
     window.dispatchEvent(new CustomEvent('kiwi-auth-synced'))
   }
 }
@@ -1392,7 +1500,7 @@ if (!prefersReducedMotion) {
   requestAnimationFrame(raf)
 }
 
-if (!isDocsPage && !isDashboardPage && !isModelsPage && !isPlaygroundPage) {
+if (!isDocsPage && !isDashboardPage && !isModelsPage && !isPlaygroundPage && !isAdminPage) {
   const revealItems = [...document.querySelectorAll<HTMLElement>('.reveal-item')]
 
   revealItems.forEach((item, index) => {
@@ -1677,6 +1785,171 @@ if (isModelsPage) {
       search?.addEventListener('input', () => renderModelRows(filteredModels()))
     })
     .catch(console.error)
+}
+
+if (isAdminPage) {
+  type AdminPayload = {
+    summary: {
+      workspaces: number
+      users: number
+      activeKeys: number
+      revokedKeys: number
+      requests30d: number
+      tokens30d: number
+      creditsUsed30d: number
+      playgroundRuns: number
+    }
+    usageByModel: Array<{ model: string; requests: number; tokens: number; spend: number }>
+    keys: Array<{ name: string; workspace: string; preview: string; scope: string; lastUsed: string | null; createdAt: string; revoked: boolean }>
+    audit: Array<{ actor: string; action: string; metadata: Record<string, unknown>; createdAt: string }>
+    runs: Array<{ title: string; model: string; tokens: number; createdAt: string }>
+  }
+
+  const adminDate = (value: string | null) => (value ? new Date(value).toLocaleString() : 'Never')
+  const setAdminStatus = (state: string, note: string) => {
+    const accessState = document.querySelector<HTMLElement>('#admin-access-state')
+    const accessNote = document.querySelector<HTMLElement>('#admin-access-note')
+    if (accessState) accessState.textContent = state
+    if (accessNote) accessNote.textContent = note
+  }
+
+  const adminListEmpty = (id: string, message: string) => {
+    const node = document.querySelector<HTMLElement>(id)
+    if (node) node.innerHTML = `<p class="empty-state">${message}</p>`
+  }
+
+  const hydrateAdmin = async () => {
+    if (!currentSession) {
+      setAdminStatus('Sign in required', 'Sign in with kiwi@admin.in to load admin data.')
+      adminListEmpty('#admin-model-usage', 'Admin data is locked.')
+      adminListEmpty('#admin-keys', 'Admin data is locked.')
+      adminListEmpty('#admin-audit', 'Admin data is locked.')
+      adminListEmpty('#admin-runs', 'Admin data is locked.')
+      return
+    }
+
+    try {
+      const data = await api<AdminPayload>('/api/admin/overview')
+      setAdminStatus('Verified admin', `${currentSession.user.email} has backend admin access.`)
+      const statMap: Record<string, string> = {
+        Workspaces: data.summary.workspaces.toLocaleString(),
+        Users: data.summary.users.toLocaleString(),
+        'Active keys': data.summary.activeKeys.toLocaleString(),
+        'Requests 30d': data.summary.requests30d.toLocaleString(),
+        'Tokens 30d': data.summary.tokens30d.toLocaleString(),
+        'Credits used': data.summary.creditsUsed30d.toLocaleString(),
+      }
+      document.querySelectorAll<HTMLElement>('[data-admin-stat]').forEach((node) => {
+        const key = node.dataset.adminStat || ''
+        node.textContent = statMap[key] || '0'
+        const cardNote = node.closest('article')?.querySelector('p')
+        if (cardNote) cardNote.textContent = key === 'Active keys' ? `${data.summary.revokedKeys.toLocaleString()} revoked` : 'Across Kiwi production'
+      })
+
+      const modelUsage = document.querySelector<HTMLElement>('#admin-model-usage')
+      if (modelUsage) {
+        modelUsage.innerHTML = data.usageByModel.length
+          ? data.usageByModel
+              .map(
+                (item) => `
+                  <div class="admin-list-row">
+                    <strong>${escapeHtml(item.model)}</strong>
+                    <span>${item.requests.toLocaleString()} requests</span>
+                    <small>${item.tokens.toLocaleString()} tokens · $${item.spend.toFixed(4)}</small>
+                  </div>
+                `,
+              )
+              .join('')
+          : '<p class="empty-state">No model usage yet.</p>'
+      }
+
+      const keys = document.querySelector<HTMLElement>('#admin-keys')
+      if (keys) {
+        keys.innerHTML = data.keys.length
+          ? data.keys
+              .map(
+                (item) => `
+                  <div class="admin-list-row ${item.revoked ? 'is-muted' : ''}">
+                    <strong>${escapeHtml(item.name)}</strong>
+                    <span>${escapeHtml(item.workspace)} · ${escapeHtml(item.preview)}</span>
+                    <small>${escapeHtml(item.scope || 'All models')} · last used ${adminDate(item.lastUsed)}</small>
+                  </div>
+                `,
+              )
+              .join('')
+          : '<p class="empty-state">No API keys yet.</p>'
+      }
+
+      const audit = document.querySelector<HTMLElement>('#admin-audit')
+      if (audit) {
+        audit.innerHTML = data.audit.length
+          ? data.audit
+              .map(
+                (item) => `
+                  <div class="admin-list-row">
+                    <strong>${escapeHtml(item.action)}</strong>
+                    <span>${escapeHtml(item.actor)}</span>
+                    <small>${adminDate(item.createdAt)}</small>
+                  </div>
+                `,
+              )
+              .join('')
+          : '<p class="empty-state">No audit events yet.</p>'
+      }
+
+      const runs = document.querySelector<HTMLElement>('#admin-runs')
+      if (runs) {
+        runs.innerHTML = data.runs.length
+          ? data.runs
+              .map(
+                (item) => `
+                  <div class="admin-list-row">
+                    <strong>${escapeHtml(item.title)}</strong>
+                    <span>${escapeHtml(item.model)}</span>
+                    <small>${item.tokens.toLocaleString()} tokens · ${adminDate(item.createdAt)}</small>
+                  </div>
+                `,
+              )
+              .join('')
+          : '<p class="empty-state">No playground runs yet.</p>'
+      }
+
+      const modelCount = document.querySelector<HTMLElement>('#admin-model-count')
+      const keyCount = document.querySelector<HTMLElement>('#admin-key-count')
+      const auditCount = document.querySelector<HTMLElement>('#admin-audit-count')
+      const runCount = document.querySelector<HTMLElement>('#admin-run-count')
+      if (modelCount) modelCount.textContent = `${data.usageByModel.length} models`
+      if (keyCount) keyCount.textContent = `${data.keys.length} keys`
+      if (auditCount) auditCount.textContent = `${data.audit.length} events`
+      if (runCount) runCount.textContent = `${data.runs.length} runs`
+    } catch (error) {
+      setAdminStatus('Access blocked', error instanceof Error ? error.message : 'Could not load admin data.')
+    }
+  }
+
+  document.querySelector<HTMLFormElement>('#admin-login-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault()
+    const message = document.querySelector<HTMLElement>('#admin-login-message')
+    const email = document.querySelector<HTMLInputElement>('#admin-email')?.value.trim() || 'kiwi@admin.in'
+    const password = document.querySelector<HTMLInputElement>('#admin-password')?.value || ''
+    if (!supabase) {
+      if (message) message.textContent = 'Supabase auth is not configured.'
+      return
+    }
+    if (message) message.textContent = 'Signing in...'
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      if (message) message.textContent = error.message
+      return
+    }
+    if (message) message.textContent = 'Signed in. Loading admin data...'
+    await hydrateAdmin()
+  })
+
+  window.addEventListener('kiwi-auth-synced', () => {
+    hydrateAdmin().catch(console.error)
+  })
+  hydrateAdmin().catch(console.error)
 }
 
 if (isPlaygroundPage) {

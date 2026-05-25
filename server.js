@@ -29,6 +29,10 @@ const allowedOrigins = (process.env.CORS_ORIGINS || 'https://kiwillm.in,https://
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean)
+const adminEmails = (process.env.ADMIN_EMAILS || 'kiwi@admin.in')
+  .split(',')
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean)
 
 app.disable('x-powered-by')
 app.use((req, res, next) => {
@@ -139,6 +143,16 @@ async function requireAuth(req, res, next) {
     const status = Number(error.status || 401)
     return res.status(status).json({ error: error instanceof Error ? error.message : 'Authentication required.' })
   }
+}
+
+async function requireAdmin(req, res, next) {
+  await requireAuth(req, res, () => {
+    const email = String(req.authUser?.email || '').toLowerCase()
+    if (!email || !adminEmails.includes(email)) {
+      return res.status(403).json({ error: 'Admin access required.' })
+    }
+    return next()
+  })
 }
 
 function pgWorkspaceToPayload(workspace, totals = {}) {
@@ -439,6 +453,126 @@ async function recordAuditEvent({ workspace, authUser, action, metadata = {} }) 
     )
   } catch (error) {
     console.warn(`Could not write audit event: ${error instanceof Error ? error.message : 'unknown error'}`)
+  }
+}
+
+async function getAdminOverview() {
+  if (!pgPool) {
+    const db = await readDb()
+    return {
+      summary: {
+        workspaces: 1,
+        users: 0,
+        activeKeys: db.keys.length,
+        revokedKeys: 0,
+        requests30d: db.workspace.requests30d,
+        tokens30d: db.workspace.tokens30d,
+        creditsUsed30d: db.workspace.usedCredits30d,
+        playgroundRuns: db.runs.length,
+      },
+      keys: db.keys.slice(0, 25).map((item) => ({
+        id: item.id,
+        name: item.name,
+        workspace: db.workspace.email,
+        preview: publicKey(item.key),
+        scope: item.scope,
+        lastUsed: item.lastUsed,
+        createdAt: item.createdAt,
+        revoked: false,
+      })),
+      usageByModel: db.usage.spendByModel || [],
+      audit: [],
+      runs: db.runs.slice(0, 20),
+    }
+  }
+
+  await ensureAuditTable()
+  const [workspaceCount, userCount, keyCounts, usageTotals, modelUsage, auditEvents, runs, recentKeys] = await Promise.all([
+    pgPool.query('select count(*)::int as count from workspaces'),
+    pgPool.query('select count(*)::int as count from app_users'),
+    pgPool.query(`
+      select
+        count(*) filter (where revoked_at is null)::int as active,
+        count(*) filter (where revoked_at is not null)::int as revoked
+      from api_keys
+    `),
+    pgPool.query(`
+      select
+        coalesce(sum(requests), 0)::int as requests,
+        coalesce(sum(total_tokens), 0)::bigint as tokens,
+        coalesce(sum(credits_used), 0)::numeric as credits
+      from daily_usage
+      where usage_date >= current_date - interval '29 days'
+    `),
+    pgPool.query(`
+      select model, sum(requests)::int as requests, sum(total_tokens)::bigint as tokens, sum(usd_estimate)::numeric as spend
+      from model_usage
+      where usage_date >= current_date - interval '29 days'
+      group by model
+      order by requests desc, tokens desc
+      limit 10
+    `),
+    pgPool.query(`
+      select actor_email, action, metadata, created_at
+      from audit_events
+      order by created_at desc
+      limit 30
+    `),
+    pgPool.query(`
+      select title, model, total_tokens as tokens, created_at
+      from playground_runs
+      order by created_at desc
+      limit 20
+    `),
+    pgPool.query(`
+      select api_keys.id, api_keys.name, api_keys.key_preview, api_keys.scope, api_keys.last_used_at,
+        api_keys.created_at, api_keys.revoked_at, workspaces.email as workspace
+      from api_keys
+      join workspaces on workspaces.id = api_keys.workspace_id
+      order by api_keys.created_at desc
+      limit 25
+    `),
+  ])
+
+  return {
+    summary: {
+      workspaces: Number(workspaceCount.rows[0]?.count || 0),
+      users: Number(userCount.rows[0]?.count || 0),
+      activeKeys: Number(keyCounts.rows[0]?.active || 0),
+      revokedKeys: Number(keyCounts.rows[0]?.revoked || 0),
+      requests30d: Number(usageTotals.rows[0]?.requests || 0),
+      tokens30d: Number(usageTotals.rows[0]?.tokens || 0),
+      creditsUsed30d: Number(usageTotals.rows[0]?.credits || 0),
+      playgroundRuns: Number(runs.rowCount || 0),
+    },
+    usageByModel: modelUsage.rows.map((row) => ({
+      model: row.model,
+      requests: Number(row.requests || 0),
+      tokens: Number(row.tokens || 0),
+      spend: Number(row.spend || 0),
+    })),
+    audit: auditEvents.rows.map((row) => ({
+      actor: row.actor_email || 'system',
+      action: row.action,
+      metadata: row.metadata || {},
+      createdAt: row.created_at,
+    })),
+    runs: runs.rows.map((row) => ({
+      title: row.title,
+      model: row.model,
+      tokens: Number(row.tokens || 0),
+      createdAt: row.created_at,
+    })),
+    keys: recentKeys.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      workspace: row.workspace,
+      preview: row.key_preview,
+      scope: row.scope,
+      lastUsed: row.last_used_at,
+      createdAt: row.created_at,
+      revoked: Boolean(row.revoked_at),
+    })),
   }
 }
 
@@ -1004,6 +1138,10 @@ app.get('/api/config', (_req, res) => {
     workerBaseUrl,
     keyPrefix: kiwiApiPrefix,
   })
+})
+
+app.get('/api/admin/overview', requireAdmin, async (_req, res) => {
+  res.json(await getAdminOverview())
 })
 
 app.get('/v1/models', (req, res) => {
