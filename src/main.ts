@@ -1,5 +1,6 @@
 import './style.css'
 import Lenis from 'lenis'
+import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js'
 
 const clients = ['Claude CLI', 'Codex', 'Cursor', 'Continue', 'Cline', 'Roo Code']
 
@@ -362,6 +363,44 @@ const escapeHtml = (value: string) =>
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
 
+type AuthProfile = {
+  name: string
+  email: string
+  avatarUrl: string
+}
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+const supabase: SupabaseClient | null = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
+
+let currentSession: Session | null = null
+
+const getAuthProfile = (user?: User | null): AuthProfile => {
+  const metadata = user?.user_metadata || {}
+  const email = user?.email || ''
+  const name = metadata.full_name || metadata.name || metadata.user_name || email.split('@')[0] || 'Builder'
+  const avatarUrl = metadata.avatar_url || metadata.picture || ''
+  return { name, email, avatarUrl }
+}
+
+const initialsFor = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'K'
+
+const authAccountMarkup = (compact = false) => `
+  <div class="auth-account ${compact ? 'auth-account-compact' : ''}" data-auth-account>
+    <button class="auth-trigger" type="button" data-auth-open>
+      <span class="auth-avatar auth-avatar-fallback" data-auth-avatar>${compact ? 'K' : 'Sign in'}</span>
+      <span class="auth-name" data-auth-name>${compact ? 'Account' : 'Sign in'}</span>
+    </button>
+    <button class="auth-signout" type="button" data-auth-signout hidden>Sign out</button>
+  </div>
+`
+
 const codePanel = (title: string, code: string) => `
   <div class="docs-code-card">
     <div class="docs-code-title">
@@ -405,7 +444,7 @@ const renderHome = () => `
         <a href="#pricing">Pricing</a>
       </div>
       <div class="nav-actions">
-        <a class="signin" href="#signin">Sign in</a>
+        ${authAccountMarkup(true)}
         <a class="button button-light" href="/dashboard">Get started</a>
       </div>
     </nav>
@@ -673,6 +712,7 @@ const renderDocs = () => `
         <a href="/dashboard">Dashboard</a>
         <a href="/models">Models</a>
       </nav>
+      ${authAccountMarkup(true)}
     </header>
 
     <article class="docs-container">
@@ -787,8 +827,8 @@ const renderDashboard = () => `
         <a href="/">Home</a>
       </nav>
       <div class="dash-account">
-        <span id="workspace-email">Workspace</span>
-        <button type="button">Sign out</button>
+        <span id="workspace-email" data-auth-name>Workspace</span>
+        ${authAccountMarkup()}
       </div>
     </header>
 
@@ -962,6 +1002,7 @@ const renderModels = () => `
         <a href="/docs">Docs</a>
         <a href="/">Home</a>
       </nav>
+      ${authAccountMarkup(true)}
     </header>
 
     <section class="models-shell">
@@ -1030,6 +1071,7 @@ const renderPlayground = () => `
         <a href="/docs">Docs</a>
         <a href="/">Home</a>
       </nav>
+      ${authAccountMarkup(true)}
     </header>
 
     <section class="playground-shell">
@@ -1150,6 +1192,121 @@ app.innerHTML = isDocsPage
         ? renderPlayground()
         : renderHome()
 
+document.body.insertAdjacentHTML(
+  'beforeend',
+  `
+    <div class="auth-modal" data-auth-modal hidden>
+      <button class="auth-backdrop" type="button" aria-label="Close sign in" data-auth-close></button>
+      <section class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <button class="auth-close" type="button" aria-label="Close sign in" data-auth-close>×</button>
+        <div class="auth-dialog-mark" aria-hidden="true">K</div>
+        <p class="auth-kicker">Kiwi account</p>
+        <h2 id="auth-title">Continue with your workspace</h2>
+        <p>Use Google or GitHub to sync your profile, avatar, and dashboard identity across Kiwi LLM.</p>
+        <div class="auth-provider-list">
+          <button type="button" data-auth-provider="google">
+            <span class="provider-icon google-icon" aria-hidden="true">G</span>
+            Continue with Google
+          </button>
+          <button type="button" data-auth-provider="github">
+            <span class="provider-icon github-icon" aria-hidden="true">GH</span>
+            Continue with GitHub
+          </button>
+        </div>
+        <small data-auth-message>${supabase ? 'Secure OAuth powered by Supabase.' : 'Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to enable login.'}</small>
+      </section>
+    </div>
+  `,
+)
+
+const authModal = document.querySelector<HTMLElement>('[data-auth-modal]')
+const authMessage = document.querySelector<HTMLElement>('[data-auth-message]')
+
+const openAuthModal = () => {
+  if (!authModal) return
+  authModal.hidden = false
+  requestAnimationFrame(() => authModal.classList.add('is-open'))
+}
+
+const closeAuthModal = () => {
+  if (!authModal) return
+  authModal.classList.remove('is-open')
+  window.setTimeout(() => {
+    authModal.hidden = true
+  }, 180)
+}
+
+const syncAuthUi = (session: Session | null) => {
+  currentSession = session
+  const profile = getAuthProfile(session?.user)
+  document.querySelectorAll<HTMLElement>('[data-auth-account]').forEach((account) => {
+    account.classList.toggle('is-signed-in', Boolean(session))
+  })
+  document.querySelectorAll<HTMLElement>('[data-auth-name]').forEach((node) => {
+    node.textContent = session ? profile.name : node.closest('.auth-account') ? 'Sign in' : 'Workspace'
+  })
+  document.querySelectorAll<HTMLElement>('[data-auth-avatar]').forEach((avatar) => {
+    avatar.classList.toggle('auth-avatar-fallback', !profile.avatarUrl || !session)
+    avatar.textContent = profile.avatarUrl && session ? '' : initialsFor(session ? profile.name : 'Kiwi')
+    avatar.style.backgroundImage = profile.avatarUrl && session ? `url("${profile.avatarUrl}")` : ''
+  })
+  document.querySelectorAll<HTMLButtonElement>('[data-auth-signout]').forEach((button) => {
+    button.hidden = !session
+  })
+}
+
+document.querySelectorAll<HTMLElement>('[data-auth-open]').forEach((button) => {
+  button.addEventListener('click', () => {
+    if (currentSession) {
+      window.location.href = '/dashboard'
+      return
+    }
+    openAuthModal()
+  })
+})
+
+document.querySelectorAll<HTMLElement>('[data-auth-close]').forEach((button) => {
+  button.addEventListener('click', closeAuthModal)
+})
+
+document.querySelectorAll<HTMLButtonElement>('[data-auth-provider]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const provider = button.dataset.authProvider as 'google' | 'github'
+    if (!supabase) {
+      if (authMessage) authMessage.textContent = 'Supabase env vars are missing. Add them, restart Vite, then try again.'
+      return
+    }
+    button.disabled = true
+    if (authMessage) authMessage.textContent = `Opening ${provider} sign in...`
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.origin + window.location.pathname },
+    })
+    if (error) {
+      button.disabled = false
+      if (authMessage) authMessage.textContent = error.message
+    }
+  })
+})
+
+document.querySelectorAll<HTMLButtonElement>('[data-auth-signout]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    if (!supabase) return
+    await supabase.auth.signOut()
+    syncAuthUi(null)
+  })
+})
+
+if (supabase) {
+  supabase.auth.getSession().then(({ data }) => syncAuthUi(data.session)).catch(console.error)
+  supabase.auth.onAuthStateChange((_event, session) => {
+    syncAuthUi(session)
+    if (session) closeAuthModal()
+  })
+} else {
+  syncAuthUi(null)
+}
+
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 if (!prefersReducedMotion) {
@@ -1246,7 +1403,7 @@ if (isDashboardPage) {
     const requestTotal = document.querySelector<HTMLElement>('#request-total')
     const spendTotal = document.querySelector<HTMLElement>('#spend-total')
 
-    if (workspaceEmail) workspaceEmail.textContent = data.workspace.email || 'Workspace'
+    if (workspaceEmail && !currentSession) workspaceEmail.textContent = data.workspace.email || 'Workspace'
     if (workspaceHealth) workspaceHealth.textContent = 'Live'
     const limits = data.limits || { plan: 'Free', rpm: 5, rpd: 200 }
     if (workspaceHealthNote) workspaceHealthNote.textContent = `${limits.plan} plan: ${limits.rpm} RPM / ${limits.rpd} RPD`
