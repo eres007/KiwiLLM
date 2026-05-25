@@ -157,30 +157,46 @@ const pricingPlans = [
 
 const footerColumns = [
   {
-    title: 'Build',
+    title: 'Products',
     links: [
-      { label: 'Docs', href: '/docs' },
-      { label: 'Playground', href: '/playground' },
-      { label: 'SDKs', href: '/sdks' },
-      { label: 'Status', href: '/status' },
-    ],
-  },
-  {
-    title: 'Company',
-    links: [
-      { label: 'Blog', href: '/blog' },
       { label: 'Pricing', href: '/top-up' },
-      { label: 'Roadmap', href: '/roadmap' },
+      { label: 'AI Models', href: '/models' },
+      { label: 'Documentation', href: '/docs' },
+      { label: 'Support', href: '/support' },
+      { label: 'Status', href: '/status' },
       { label: 'Changelog', href: '/changelog' },
     ],
   },
   {
-    title: 'Connect',
+    title: 'Contact',
     links: [
+      { label: 'Contact Us', href: '/contact' },
+      { label: 'Email Support', href: 'mailto:support@kiwillm.in' },
+    ],
+  },
+  {
+    title: 'Programs',
+    links: [{ label: 'Creator Program', href: '/creator-program' }],
+  },
+  {
+    title: 'Company',
+    links: [
+      { label: 'Blogs', href: '/blog' },
+      { label: 'Refund Policy', href: '/refund-policy' },
+      { label: 'Privacy Policy', href: '/privacy' },
+      { label: 'Terms & Conditions', href: '/terms' },
+      { label: 'Cookie Policy', href: '/cookie-policy' },
+      { label: 'Acceptable Use', href: '/acceptable-use' },
+    ],
+  },
+  {
+    title: 'Social',
+    links: [
+      { label: 'Twitter', href: 'https://x.com/KIWILLM' },
       { label: 'Discord', href: '/community' },
-      { label: 'Telegram', href: 'https://t.me/KIWILLM' },
-      { label: 'X / Twitter', href: 'https://x.com/KIWILLM' },
+      { label: 'LinkedIn', href: '/linkedin' },
       { label: 'GitHub', href: '/github' },
+      { label: 'Telegram', href: 'https://t.me/KIWILLM' },
     ],
   },
 ]
@@ -265,6 +281,51 @@ const supportPages: Record<
     ],
     cta: { label: 'View models', href: '/models' },
   },
+  '/support': {
+    title: 'Support - Kiwi LLM',
+    label: 'Support',
+    eyebrow: 'HELP',
+    intro: 'Get help with setup, keys, billing, model routes, and production gateway behavior.',
+    blocks: [
+      {
+        title: 'Before you write in',
+        text: 'Check your base URL, key prefix, CORS origin, Supabase session, and credit balance. Most setup issues come from one of those five places.',
+        items: ['Base URL should be https://api.kiwillm.in/v1.', 'API keys should start with Kiwi_.', 'Protected dashboard actions require a signed-in workspace.'],
+      },
+      { title: 'Support channels', text: 'Use the contact page for general questions or email support for account-specific issues.' },
+    ],
+    cta: { label: 'Contact us', href: '/contact' },
+  },
+  '/contact': {
+    title: 'Contact - Kiwi LLM',
+    label: 'Contact Us',
+    eyebrow: 'CONTACT',
+    intro: 'Reach Kiwi for partnerships, account help, billing questions, production onboarding, or model route requests.',
+    blocks: [
+      {
+        title: 'Email support',
+        text: 'For account-specific help, include your workspace email, affected endpoint, approximate request time, and any error code shown in the dashboard.',
+        items: ['support@kiwillm.in', 'Response priority goes to billing, auth, and production routing issues.', 'Never send full API keys in support messages.'],
+      },
+      { title: 'Partnerships', text: 'For provider partnerships, creator launches, or custom model routes, include expected traffic, regions, and target clients.' },
+    ],
+    cta: { label: 'Email support', href: 'mailto:support@kiwillm.in' },
+  },
+  '/creator-program': {
+    title: 'Creator Program - Kiwi LLM',
+    label: 'Creator Program',
+    eyebrow: 'PROGRAMS',
+    intro: 'The creator program is for builders, educators, and community leads who teach practical agent workflows with Kiwi.',
+    blocks: [
+      {
+        title: 'What creators get',
+        text: 'Approved creators can receive starter credits, tracked invite codes, early feature previews, and support for tutorials or workshops.',
+        items: ['Custom redeem codes', 'Usage examples for common AI clients', 'Launch support for guides and videos'],
+      },
+      { title: 'Who should apply', text: 'Developers, AI educators, open-source maintainers, and community hosts with a real audience of builders.' },
+    ],
+    cta: { label: 'Contact us', href: '/contact' },
+  },
   '/sdks': {
     title: 'SDKs - Kiwi LLM',
     label: 'SDKs',
@@ -282,12 +343,55 @@ const supportPages: Record<
   },
   '/blog': {
     title: 'Blog - Kiwi LLM',
-    label: 'Blog',
+    label: 'Blogs',
     eyebrow: 'NOTES',
     intro: 'A place for release stories, routing notes, model comparisons, and practical guides for agent-heavy teams.',
     blocks: [
       { title: 'Launch notes', text: 'Kiwi brings model routing, key management, usage metering, playground runs, and admin credit tools into one app.' },
       { title: 'Coming articles', text: 'Planned posts include Codex setup, Claude CLI routing, credit planning, and provider fallback strategy.' },
+    ],
+  },
+  '/refund-policy': {
+    title: 'Refund Policy - Kiwi LLM',
+    label: 'Refund Policy',
+    eyebrow: 'BILLING',
+    intro: 'Kiwi credits are designed for predictable usage. This policy explains when refunds can be reviewed.',
+    blocks: [
+      {
+        title: 'Eligible reviews',
+        text: 'Refunds may be reviewed for duplicate payments, failed credit delivery, accidental overcharges, or verified platform errors.',
+        items: ['Include payment reference, workspace email, and date.', 'Used credits are generally not refundable.', 'Provider outages may be handled through credits when appropriate.'],
+      },
+      { title: 'Processing', text: 'Approved refunds return to the original payment method when possible. Crypto refunds may require additional verification.' },
+    ],
+    cta: { label: 'Contact support', href: 'mailto:support@kiwillm.in' },
+  },
+  '/cookie-policy': {
+    title: 'Cookie Policy - Kiwi LLM',
+    label: 'Cookie Policy',
+    eyebrow: 'PRIVACY',
+    intro: 'Kiwi uses essential browser storage for sessions, security, preferences, and product functionality.',
+    blocks: [
+      {
+        title: 'What we store',
+        text: 'Authentication sessions are handled by Supabase. The app may also store local UI preferences and playground presets in your browser.',
+        items: ['Admin session tokens use session storage.', 'Playground presets use local storage.', 'Analytics or marketing cookies should be disclosed here before launch if added.'],
+      },
+      { title: 'Choices', text: 'You can clear browser storage at any time. Some authenticated features will require signing in again.' },
+    ],
+  },
+  '/acceptable-use': {
+    title: 'Acceptable Use - Kiwi LLM',
+    label: 'Acceptable Use',
+    eyebrow: 'POLICY',
+    intro: 'Kiwi is built for legitimate development, automation, research, and production AI workloads.',
+    blocks: [
+      {
+        title: 'Not allowed',
+        text: 'Do not use Kiwi for illegal activity, credential theft, malware, spam, harassment, evading provider safety systems, or abusing upstream model networks.',
+        items: ['Do not share or resell keys without permission.', 'Do not attempt to bypass rate limits or metering.', 'Do not send content that violates upstream provider policy.'],
+      },
+      { title: 'Enforcement', text: 'We may throttle, suspend, revoke keys, or close workspaces that create security, legal, billing, or provider-risk issues.' },
     ],
   },
   '/roadmap': {
@@ -335,6 +439,17 @@ const supportPages: Record<
       { title: 'For now', text: 'Docs include the integration examples needed to connect Kiwi to existing clients.' },
     ],
     cta: { label: 'Open docs', href: '/docs' },
+  },
+  '/linkedin': {
+    title: 'LinkedIn - Kiwi LLM',
+    label: 'LinkedIn',
+    eyebrow: 'SOCIAL',
+    intro: 'This page is the stable footer destination for LinkedIn until the official company profile is connected.',
+    blocks: [
+      { title: 'Company updates', text: 'Use LinkedIn for launch announcements, hiring posts, partnership updates, and longer company notes.' },
+      { title: 'For now', text: 'Telegram and the blog are the best places to follow current Kiwi updates.' },
+    ],
+    cta: { label: 'Open blog', href: '/blog' },
   },
 }
 
