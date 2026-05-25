@@ -396,11 +396,14 @@ const initialsFor = (name: string) =>
 
 const authAccountMarkup = (compact = false) => `
   <div class="auth-account ${compact ? 'auth-account-compact' : ''}" data-auth-account>
-    <button class="auth-trigger" type="button" data-auth-open>
+    <button class="auth-trigger" type="button" aria-haspopup="menu" aria-expanded="false" data-auth-open>
       <span class="auth-avatar auth-avatar-fallback" data-auth-avatar>${compact ? 'K' : 'Sign in'}</span>
       <span class="auth-name" data-auth-name>${compact ? 'Account' : 'Sign in'}</span>
     </button>
-    <button class="auth-signout" type="button" data-auth-signout hidden>Sign out</button>
+    <div class="auth-menu" role="menu" data-auth-menu hidden>
+      <a href="/dashboard" role="menuitem" data-auth-dashboard>Dashboard</a>
+      <button type="button" role="menuitem" data-auth-signout>Sign out</button>
+    </div>
   </div>
 `
 
@@ -448,7 +451,7 @@ const renderHome = () => `
       </div>
       <div class="nav-actions">
         ${authAccountMarkup(true)}
-        <a class="button button-light" href="/dashboard">Get started</a>
+        <a class="button button-light" href="/dashboard" data-guest-cta>Get started</a>
       </div>
     </nav>
 
@@ -1225,6 +1228,15 @@ document.body.insertAdjacentHTML(
 const authModal = document.querySelector<HTMLElement>('[data-auth-modal]')
 const authMessage = document.querySelector<HTMLElement>('[data-auth-message]')
 
+const closeAuthMenus = (except?: HTMLElement) => {
+  document.querySelectorAll<HTMLElement>('[data-auth-account]').forEach((account) => {
+    if (account === except) return
+    account.classList.remove('is-menu-open')
+    account.querySelector<HTMLElement>('[data-auth-menu]')?.setAttribute('hidden', '')
+    account.querySelector<HTMLButtonElement>('[data-auth-open]')?.setAttribute('aria-expanded', 'false')
+  })
+}
+
 const openAuthModal = () => {
   if (!authModal) return
   authModal.hidden = false
@@ -1244,6 +1256,7 @@ const syncAuthUi = (session: Session | null) => {
   const profile = getAuthProfile(session?.user)
   document.querySelectorAll<HTMLElement>('[data-auth-account]').forEach((account) => {
     account.classList.toggle('is-signed-in', Boolean(session))
+    account.classList.remove('is-menu-open')
   })
   document.querySelectorAll<HTMLElement>('[data-auth-name]').forEach((node) => {
     node.textContent = session ? profile.name : node.closest('.auth-account') ? 'Sign in' : 'Workspace'
@@ -1253,15 +1266,24 @@ const syncAuthUi = (session: Session | null) => {
     avatar.textContent = profile.avatarUrl && session ? '' : initialsFor(session ? profile.name : 'Kiwi')
     avatar.style.backgroundImage = profile.avatarUrl && session ? `url("${profile.avatarUrl}")` : ''
   })
-  document.querySelectorAll<HTMLButtonElement>('[data-auth-signout]').forEach((button) => {
-    button.hidden = !session
+  document.querySelectorAll<HTMLElement>('[data-auth-menu]').forEach((menu) => {
+    menu.hidden = true
+  })
+  document.querySelectorAll<HTMLElement>('[data-guest-cta]').forEach((cta) => {
+    cta.hidden = Boolean(session)
   })
 }
 
 document.querySelectorAll<HTMLElement>('[data-auth-open]').forEach((button) => {
   button.addEventListener('click', () => {
+    const account = button.closest<HTMLElement>('[data-auth-account]')
     if (currentSession) {
-      window.location.href = '/dashboard'
+      const menu = account?.querySelector<HTMLElement>('[data-auth-menu]')
+      if (!account || !menu) return
+      const isOpen = account.classList.toggle('is-menu-open')
+      button.setAttribute('aria-expanded', String(isOpen))
+      menu.hidden = !isOpen
+      if (isOpen) closeAuthMenus(account)
       return
     }
     openAuthModal()
@@ -1298,6 +1320,18 @@ document.querySelectorAll<HTMLButtonElement>('[data-auth-signout]').forEach((but
     await supabase.auth.signOut()
     syncAuthUi(null)
   })
+})
+
+document.addEventListener('click', (event) => {
+  if (!(event.target instanceof Element)) return
+  if (!event.target.closest('[data-auth-account]')) closeAuthMenus()
+})
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeAuthMenus()
+    closeAuthModal()
+  }
 })
 
 if (supabase) {
