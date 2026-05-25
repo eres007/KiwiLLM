@@ -2,8 +2,9 @@ import './style.css'
 import Lenis from 'lenis'
 import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js'
 import { pageNotFound, renderSupportPage, supportPages } from './pages/supportPages'
-import { refundPolicyTitle, renderRefundPolicyPage } from './pages/refundPolicy'
+import { renderRefundPolicyPage } from './pages/refundPolicy'
 import { renderTopUpPage } from './pages/topUp'
+import { applySeo } from './seo'
 
 const clients = ['Claude CLI', 'Codex', 'Cursor', 'Continue', 'Cline', 'Roo Code']
 
@@ -1421,25 +1422,7 @@ const isAdminPage = window.location.pathname === '/admin'
 const isTopUpPage = window.location.pathname === '/top-up'
 const isRefundPage = window.location.pathname === '/refund-policy'
 const supportPage = supportPages[window.location.pathname]
-document.title = isDocsPage
-  ? 'Docs - Kiwi LLM'
-  : isDashboardPage
-    ? 'Dashboard - Kiwi LLM'
-    : isModelsPage
-      ? 'Models - Kiwi LLM'
-      : isPlaygroundPage
-        ? 'Playground - Kiwi LLM'
-        : isAdminPage
-          ? 'Admin - Kiwi LLM'
-          : isTopUpPage
-            ? 'Top up - Kiwi LLM'
-            : isRefundPage
-              ? refundPolicyTitle
-              : supportPage
-              ? supportPage.title
-              : window.location.pathname === '/'
-                ? 'Kiwi LLM'
-                : 'Page not found - Kiwi LLM'
+applySeo(window.location.pathname)
 app.innerHTML = isDocsPage
   ? renderDocs()
   : isDashboardPage

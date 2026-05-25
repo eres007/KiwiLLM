@@ -1,0 +1,22 @@
+{
+  "name": "Kiwi LLM",
+  "short_name": "Kiwi LLM",
+  "description": "One API gateway for AI models, coding agents, credits, and usage tracking.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020303",
+  "theme_color": "#020303",
+  "icons": [
+    {
+      "src": "/kiwi-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/kiwi-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
